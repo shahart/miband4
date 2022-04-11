@@ -77,7 +77,7 @@ class Delegate(DefaultDelegate):
                 print("Unexpected data on handle " + str(hnd) + ": " + str(data))
                 return
         elif hnd == self.device._char_activity.getHandle():
-            if len(data) % 4 is 1:
+            if len(data) % 4 == 1:
                 self.pkg += 1
                 i = 1
                 while i < len(data):
