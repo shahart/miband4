@@ -4,6 +4,7 @@
 
 import argparse
 import subprocess
+import shutil
 import time
 from datetime import datetime
 
@@ -96,14 +97,16 @@ def general_info():
 
 
 def send_notif():
-    msg = input ("Enter message or phone number to be displayed: ")
-    ty= int(input ("1 for Message / 2 for Missed Call / 3 for Call: "))
-    if(ty > 3 or ty < 1):
+    title = input ("Enter title or phone number to be displayed: ")
+    print ('Reminder: at Mi Band 4 you have 10 characters per line, and up to 6 lines. To add a new line use new line character \n')
+    msg = input ("Enter optional message to be displayed: ")
+    ty= int(input ("1 for Mail / 2 for Message / 3 for Missed Call / 4 for Call: "))
+    if(ty > 4 or ty < 1):
         print ('Invalid choice')
         time.sleep(2)
         return
-    a=[5,4,3]
-    band.send_custom_alert(a[ty-1],msg)
+    a=[1,5,4,3]
+    band.send_custom_alert(a[ty-1],title,msg)
 
 
 # Needs Auth
@@ -127,6 +130,12 @@ def restore_firmware():
     print("This feature has the potential to brick your Mi Band 4. You are doing this at your own risk.")
     path = input("Enter the path of the firmware file :")
     band.dfuUpdate(path)
+
+# Needs Auth
+def update_watchface():
+    path = input("Enter the path of the watchface .bin file :")
+    band.dfuUpdate(path)
+
 
 
 # Needs Auths
@@ -155,14 +164,47 @@ def _default_music_focus_out():
     print("Music focus out")    
 
 
-def set_music():
+def set_music(): 
     band.setMusicCallback(_default_music_play,_default_music_pause,_default_music_forward,_default_music_back,_default_music_vup,_default_music_vdown,_default_music_focus_in,_default_music_focus_out)
-    fi = input("Set music track to : ")
-    band.setTrack(fi, MUSICSTATE.PLAYED)
+    fi = input("Set music track artist to : ")
+    fj = input("Set music track album to: ")
+    fk = input("Set music track title to: ")
+    fl = int(input("Set music volume: "))
+    fm = int(input("Set music position: "))
+    fn = int(input("Set music duration: "))
+    band.setTrack(MUSICSTATE.PLAYED,fi,fj,fk,fl,fm,fn)
     while True:
         if band.waitForNotifications(0.5):
             continue
     input("enter any key")
+
+
+def lost_device():
+    found = False
+    notify = shutil.which("notify-send") is not None
+
+    def lost_device_callback():
+        if notify:
+            subprocess.call(["notify-send", "Device Lost"])
+        else:
+            print("Searching for this device")
+        print('Click on the icon on the band to stop searching')
+
+    def found_device_callback():
+        nonlocal found
+        if notify:
+            subprocess.call(["notify-send", "Found device"])
+        else:
+            print("Searching for this device")
+        found = True
+
+    band.setLostDeviceCallback(lost_device_callback, found_device_callback)
+    print('Click "Lost Device" on the band')
+    while not found:
+        if band.waitForNotifications(0.5):
+            continue
+    input("enter any key")
+
 
 def activity_log_callback(timestamp,c,i,s,h):
     print("{}: category: {}; intensity {}; steps {}; heart rate {};\n".format( timestamp.strftime('%d.%m - %H:%M'), c, i ,s ,h))
@@ -174,7 +216,7 @@ def get_activity_logs():
     band.get_activity_betwn_intervals(datetime(temp.year,temp.month,temp.day),datetime.now(),activity_log_callback)
     while True:
         band.waitForNotifications(0.2)
-    
+
 if __name__ == "__main__":
     success = False
     while not success:
@@ -196,15 +238,17 @@ if __name__ == "__main__":
         
     menu = CursesMenu("MIBand4", "Features marked with @ require Auth Key")
     info_item = FunctionItem("Get general info of the device", general_info)
-    call_item = FunctionItem("Send Call/ Missed Call/Message", send_notif)
+    call_item = FunctionItem("Send Mail/ Call/ Missed Call/ Message", send_notif)
     set_music_item = FunctionItem("Set the band's music and receive music controls", set_music)
+    lost_device_item = FunctionItem("Listen for Device Lost notifications", lost_device)
     steps_item = FunctionItem("@ Get Steps/Meters/Calories/Fat Burned", get_step_count)
     single_heart_rate_item = FunctionItem("@ Get Heart Rate", get_heart_rate)
     real_time_heart_rate_item = FunctionItem("@ Get realtime heart rate data", get_realtime)
     get_band_activity_data_item = FunctionItem("@ Get activity logs for a day", get_activity_logs)
     set_time_item= FunctionItem("@ Set the band's time to system time", set_time)
+    update_watchface_item = FunctionItem("@ Update Watchface", update_watchface)
     dfu_update_item = FunctionItem("@ Restore/Update Firmware", restore_firmware)
-
+    
     menu.append_item(info_item)
     menu.append_item(steps_item)
     menu.append_item(call_item)
@@ -213,5 +257,7 @@ if __name__ == "__main__":
     menu.append_item(get_band_activity_data_item)
     menu.append_item(set_time_item)
     menu.append_item(set_music_item)
+    menu.append_item(lost_device_item)
+    menu.append_item(update_watchface_item)
     menu.append_item(dfu_update_item)
     menu.show()
