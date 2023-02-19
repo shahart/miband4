@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name='viewport' content='width=device-width, height=device-height, initial-scale=1.0'>
+    <link rel="shortcut icon" href="#">
+    <title>hebToBand</title>
+    <!-- had this in Python, lost the sources, trying with JS -->
+</head>
+<body>
+<script>
+
+    function hebToBand() {
+
+        var input = document.getElementById("input").value;
+        let output = [];
+        let foundHeb = false;
+        let reverse = "";
+        let zeppLength = parseInt(document.getElementById("zeppLength").value) + 1;
+
+        if (30 < zeppLength || zeppLength < 10) {
+            alert("invalid line length");
+            throw new Error("invalid line length");
+        }
+
+        for (let i = input.length-1; i >= 0; i--) {
+            reverse += input[i];
+            if (input[i] >= 'א' && input[i] <= 'ת') {
+                foundHeb = true;
+            }
+        }
+
+        if (!foundHeb) {
+            document.getElementById("special").innerHTML = '<p style="color:red">Found no hebrew character</p>';
+        }
+
+        let currLine = "";
+        for (let i = 0;  i < reverse.length; ++i) {
+            currLine += reverse[i];
+            if (currLine.length === zeppLength) {
+                if (reverse[i] !== ' ') {
+                    while (reverse[i] !== ' ') {
+                        --i;
+                        currLine = currLine.substring(0, currLine.length-1);
+                    }
+                    while (currLine.length < zeppLength) {
+                        currLine = ' ' + currLine;
+                    }
+                }
+                output.push(currLine.substring(0, zeppLength-1));
+                currLine = '';
+            }
+        }
+
+        if (currLine.length > 0) {
+            while (currLine.length < zeppLength-1) {
+                currLine = ' ' + currLine;
+            }
+            output.push(currLine.substring(0, zeppLength-1));
+        }
+
+        let res = "";
+        for (let i = output.length-1; i >= 0; --i) {
+            res += output[i];
+        }
+
+        let resNewline = "\n";
+        for (let i = output.length-1; i >= 0; --i) {
+            resNewline += output[i] + '\n';
+        }
+
+        document.getElementById("result").innerHTML =
+            res + "\n" + resNewline;
+    }
+</script>
+<label id="special"></label>
+<p>
+Line length
+<p>
+<input type="number" id="zeppLength" value="18" min="10" max="30" size="2">
+<p>
+Text
+<p>
+<textarea id="input" rows="3" cols="30">ודע שהאדם צריך לעבור על גשר צר מאוד והכלל והעיקר שלא יתפחד כלל</textarea>
+<p>
+<button onclick="hebToBand()">Cut to band</button>
+<p>
+<textarea id="result" rows="7" cols="30"></textarea>
+<p>
+Copy the 1st line, and proceed to <b>Notify for Amazfit</b>
+</body>
+</html>
