@@ -9,10 +9,8 @@
 </head>
 <body>
 <script>
-
     function hebToBand() {
-
-        var input = document.getElementById("input").value;
+        let input = document.getElementById("input").value;
         let output = [];
         let foundHeb = false;
         let reverse = "";
@@ -22,55 +20,43 @@
             alert("invalid line length");
             throw new Error("invalid line length");
         }
-
         for (let i = input.length-1; i >= 0; i--) {
-            reverse += input[i];
+            reverse += input[i] !== ' ' ? input[i] : '.';
             if (input[i] >= 'א' && input[i] <= 'ת') {
                 foundHeb = true;
             }
         }
-
         if (!foundHeb) {
             document.getElementById("special").innerHTML = '<p style="color:red">Found no hebrew character</p>';
         }
-
         let currLine = "";
         for (let i = 0;  i < reverse.length; ++i) {
             currLine += reverse[i];
             if (currLine.length === zeppLength) {
-                if (reverse[i] !== ' ') {
-                    while (reverse[i] !== ' ') {
+                if (reverse[i] !== '.') {
+                    while (reverse[i] !== '.') {
                         --i;
                         currLine = currLine.substring(0, currLine.length-1);
                     }
                     while (currLine.length < zeppLength) {
-                        currLine = ' ' + currLine;
+                        currLine = '.' + currLine;
                     }
                 }
                 output.push(currLine.substring(0, zeppLength-1));
                 currLine = '';
             }
         }
-
         if (currLine.length > 0) {
             while (currLine.length < zeppLength-1) {
-                currLine = ' ' + currLine;
+                currLine = '.' + currLine;
             }
             output.push(currLine.substring(0, zeppLength-1));
         }
-
         let res = "";
         for (let i = output.length-1; i >= 0; --i) {
             res += output[i];
         }
-
-        let resNewline = "\n";
-        for (let i = output.length-1; i >= 0; --i) {
-            resNewline += output[i] + '\n';
-        }
-
-        document.getElementById("result").innerHTML =
-            res + "\n" + resNewline;
+        document.getElementById("result").innerHTML = res;
     }
 </script>
 <label id="special"></label>
@@ -78,15 +64,20 @@
 Line length
 <p>
 <input type="number" id="zeppLength" value="18" min="10" max="30" size="2">
+<!-- Mi Band 4 - 12 chars -->
 <p>
 Text
 <p>
-<textarea id="input" rows="3" cols="30">ודע שהאדם צריך לעבור על גשר צר מאוד והכלל והעיקר שלא יתפחד כלל</textarea>
+<textarea id="input" rows="3" cols="30">ודע שהאדם צריך לעבור על גשר צר מאוד מאוד והכלל והעיקר שלא יתפחד כלל - ליקוטי מוהרן תנינא מח ב
+</textarea>
 <p>
-<button onclick="hebToBand()">Cut to band</button>
+<button onclick="hebToBand()">Format to Band</button>
 <p>
-<textarea id="result" rows="7" cols="30"></textarea>
+<!-- textarea, cols=125 = 7 lines -->
+<b>
+<text id="result"></text>
+</b>
 <p>
-Copy the 1st line, and proceed to <b>Notify for Amazfit</b>
+Copy the 1st line, and proceed to <i>Notify for Amazfit</i>
 </body>
 </html>
