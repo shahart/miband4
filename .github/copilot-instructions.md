@@ -46,6 +46,52 @@ python3 miband4_console.py -m <MAC> -k <32-char-hex-key>
 ```
 
 ### Authentication Flow (with auth key)
+
+**Sequence Diagram:**
+```
+Library                          Mi Band 4                    Delegate
+  |                                 |                            |
+  |------ initialize() ------------>|                            |
+  |                                 |                            |
+  |--- _req_rdn() (0x02,0x00)------>|                            |
+  |                                 |                            |
+  |<-- b'\x10\x02\x01' + 16bytes---|-- handleNotification() --->|
+  |                 (random number)  |<-- _send_enc_rdn() -------|
+  |                                 |                            |
+  |--- encrypt + send (0x03,0x00)-->|                            |
+  |                                 |                            |
+  |<-- b'\x10\x03\x01' (AUTH_OK) ---|-- state=AUTH_OK ---------->|
+  |                                 |                            |
+  |--- _auth_notif(False) --------->|                            |
+  |     (disable notifications)      |                            |
+```
+
+**State Machine:**
+```
+[START] 
+  ↓
+initialize() → _req_rdn() 
+  ↓
+waitForNotifications() → receive b'\x10\x02\x01'
+  ↓
+_send_enc_rdn(random) with AES-ECB
+  ↓
+waitForNotifications() → receive b'\x10\x03\x01'
+  ↓
+state = AUTH_STATES.AUTH_OK → return True
+  ↓
+_auth_notif(False) [disable auth notifications]
+  ↓
+[READY for auth-required features]
+
+Error paths:
+- b'\x10\x01\x04' → AUTH_STATES.KEY_SENDING_FAILED
+- b'\x10\x02\x04' → AUTH_STATES.REQUEST_RN_ERROR
+- b'\x10\x03\x04' → AUTH_STATES.ENCRIPTION_KEY_FAILED → retry _send_key()
+- Timeout → AUTH_STATES.AUTH_FAILED
+```
+
+**Implementation:**
 1. Call `initialize()` → sends random number request
 2. Receives random number in `Delegate.handleNotification()`
 3. Encrypt with AES-ECB, send encrypted value
@@ -53,12 +99,130 @@ python3 miband4_console.py -m <MAC> -k <32-char-hex-key>
 5. Disable auth notifications before using features
 
 ### Data Fetching Pattern (Activity Logs, Heart Rate)
+
+**Heart Rate Realtime Flow:**
+```
+start_heart_rate_realtime(callback)
+  ↓
+[Initialize]
+- Enable heart_measure descriptor notifications
+- Send control: b'\x15\x02\x00' (stop manual)
+- Send control: b'\x15\x01\x00' (stop continuous)
+- Send control: b'\x15\x01\x01' (start continuous)
+  ↓
+[Main Loop - every 0.5s]
+waitForNotifications(0.5)
+  ↓
+Delegate receives on handle=_char_heart_measure
+  → queue.put((QUEUE_TYPES.HEART, data))
+  ↓
+_parse_queue()
+  → heart_measure_callback(struct.unpack('bb', data)[1])
+  ↓
+[Keep-alive - every 12s]
+Send ping: b'\x16'
+  ↓
+[Until stop_realtime() called]
+- Disable notifications
+- Send b'\x15\x01\x00' (stop monitoring)
+- Clear callbacks
+```
+
+**Activity Log Fetch Flow:**
+```
+get_activity_betwn_intervals(start_ts, end_ts, callback)
+  ↓
+start_get_previews_data(start_timestamp)
+  ↓
+[Enable notifications]
+- _auth_previews_data_notif(True)
+- Enable _char_fetch and _char_activity descriptors
+  ↓
+[Trigger data fetch]
+Send timestamp packet on _char_fetch
+  ↓
+Delegate receives b'\x10\x01\x01' on _char_fetch
+  → Extract first_timestamp from response
+  → Send b'\x02' (acknowledge)
+  ↓
+Delegate receives activity data on _char_activity (4-byte chunks)
+  → Parse: [category, intensity, steps, heart_rate]
+  → Increment timestamp by 1 minute
+  → If timestamp < end_timestamp: call callback(ts, c, i, s, h)
+  ↓
+Delegate receives b'\x10\x02\x01' on _char_fetch
+  → If more data needed: trigger next interval
+  → Else: finish
+  ↓
+[Disable notifications when done]
+_auth_previews_data_notif(False)
+```
+
+**Queue-based Data Buffering:**
 - **Polling-based**: Use `waitForNotifications(timeout)` to block for BLE events
 - **Callback pattern**: Pass callback functions (e.g., `heart_measure_callback`) to handlers
 - **Queue extraction**: `_get_from_queue(QUEUE_TYPES.XXX)` filters by type; unused items re-queued
+- **Thread-safe**: `Queue` from `queue` module (Python 3) handles concurrent access
 - Example: `start_heart_rate_realtime()` loops `waitForNotifications(0.5)` with 12-sec ping
 
 ## Project-Specific Patterns
+
+### Delegate Notification Routing
+
+**BLE Event Handler Architecture:**
+```
+Delegate.handleNotification(hnd, data)
+  ↓
+[Route by handle]
+  ├─ _char_auth.getHandle() → Parse auth state
+  │   ├─ b'\x10\x01\x01' → _req_rdn()
+  │   ├─ b'\x10\x02\x01' → _send_enc_rdn(random_nr)
+  │   ├─ b'\x10\x03\x01' → state = AUTH_OK
+  │   └─ b'\x10\x03\x04' → state = ENCRIPTION_KEY_FAILED → retry
+  │
+  ├─ _char_heart_measure.getHandle() → queue.put((QUEUE_TYPES.HEART, data))
+  │
+  ├─ Handle 0x38 → Raw sensor data
+  │   ├─ 20 bytes, data[0]==1 → queue.put((QUEUE_TYPES.RAW_ACCEL, data))
+  │   └─ 16 bytes → queue.put((QUEUE_TYPES.RAW_HEART, data))
+  │
+  ├─ _char_fetch.getHandle() → Activity control flow
+  │   ├─ b'\x10\x01\x01' → Extract timestamp, send b'\x02' ACK
+  │   ├─ b'\x10\x02\x01' → Request next interval or finish
+  │   └─ b'\x10\x02\x04' → No more data available
+  │
+  ├─ _char_activity.getHandle() → Parse 4-byte activity records
+  │   └─ [category, intensity, steps, heart_rate] per record
+  │
+  └─ Handle 74 → Music & lost device commands
+      ├─ 0x08 → Start ringing (writeDisplayCommand([0x14, 0x00, 0x00]))
+      ├─ 0x0f → Stop ringing (writeDisplayCommand([0x14, 0x00, 0x01]))
+      ├─ 0xe0 → Music focus in (call _default_music_focus_in())
+      ├─ 0xe1 → Music focus out
+      ├─ 0x00 → Play
+      ├─ 0x01 → Pause
+      ├─ 0x03 → Forward
+      ├─ 0x04 → Backward
+      ├─ 0x05 → Volume up
+      └─ 0x06 → Volume down
+```
+
+**Queue Processing Pattern:**
+```
+[During long operations]
+Delegate receives data → queue.put((type, data))
+  ↓
+Main loop: waitForNotifications(0.5)
+  ↓
+_parse_queue() extracts all queued items by type
+  ↓
+For each matched type:
+  - QUEUE_TYPES.HEART → call heart_measure_callback()
+  - QUEUE_TYPES.RAW_HEART → call heart_raw_callback()
+  - QUEUE_TYPES.RAW_ACCEL → call accel_raw_callback()
+  ↓
+Non-matching items → re-queued for next cycle
+```
 
 ### Byte Protocol Encoding
 
@@ -162,9 +326,45 @@ descriptor.write(b"\x00\x00", True)  # disable
 ```
 
 ### DFU (Device Firmware Update)
+
+**Firmware/Watchface Update Flow:**
+```
+dfuUpdate(fileName)
+  ↓
+[Preparation]
+- Calculate CRC32 checksum: zlib.crc32(file)
+- Get file size: os.path.getsize()
+- Detect type: .fw (firmware) or .bin (watchface)
+  ↓
+[Send Start Payload]
+Send on _char_firmware:
+  b'\x01\x08' + 3-byte little-endian size + b'\x00' + 4-byte CRC32
+  → Device acknowledges with b'\x03\x01'
+  ↓
+[Send Data]
+Loop: Read file in 20-byte chunks
+  → Write each chunk to _char_firmware_write
+  → Device may throttle; handle BTLEException gracefully
+  ↓
+[Finalization]
+- Send: b'\x00' (data complete)
+- waitForNotifications(2)
+- Send: b'\x04' (checksum validation)
+- waitForNotifications(2)
+- If .fw extension: Send b'\x05' (reboot)
+- If .bin extension: Skip reboot (device handles internally)
+  ↓
+[Result]
+.fw files → Device reboots; connection lost
+.bin files → Device updates watchface; stays connected
+```
+
+**Key Implementation Details:**
 - Sequential: send start payload → write firmware in 20-byte chunks → send completion commands
 - CRC32 calculated with `zlib` (optional dependency)
 - Firmware (.fw) triggers reboot command; watchface (.bin) does not
+- **⚠️ WARNING**: `dfuUpdate()` can hard-brick device; only use with official firmware files
+- File must be binary format (read with `"rb"` mode)
 
 ### Data Parsing Helpers
 - `_parse_date()` — handles 9-byte timestamp (year, month, day, hour, minute, second, weekday, fractions)
