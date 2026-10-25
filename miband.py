@@ -344,7 +344,9 @@ class miband(Peripheral):
         day_of_week = struct.unpack('b', bytes[7:8])[0] if len(bytes) >= 8 else None
         fractions256 = struct.unpack('b', bytes[8:9])[0] if len(bytes) >= 9 else None
 
-        return {"date": datetime(*(year, month, day, hours, minutes, seconds)), "day_of_week": day_of_week, "fractions256": fractions256}
+        date_parts = (year, month, day, hours, minutes, seconds)
+        date = datetime(*date_parts) if all(part is not None for part in date_parts) else None
+        return {"date": date, "day_of_week": day_of_week, "fractions256": fractions256}
 
     @staticmethod
     def create_date_data(date):
